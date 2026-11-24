@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.1
+
+- `/usage-meter off` and `on` keep their switch in the mod's own store instead of changing the **Warnings** setting, so the mod never writes your settings. `off` still quiets every session at once.
+- Removed the `engines` field from `plugin.json` (the README states the minimum version).
+- README: what each hook does and changes.
+
 ## 0.2.0
 
 - **Subagent types to leave alone** (`skipAgents`): subagent types that are never warned, such as `Explore, Plan`; `*` matches anything, as in `my-plugin:*`.

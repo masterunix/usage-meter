@@ -64,9 +64,14 @@ function world(on: On, store: Record<string, unknown> = {}): World {
 }
 
 /** One tool call, as Claude Code raises PostToolUse; what the model is told after it. */
-async function toolCall($: Engine, agentId?: string, agentType = 'general-purpose'): Promise<string> {
+async function toolCall(
+  $: Engine,
+  agentId?: string,
+  agentType = 'general-purpose',
+  session = 's1',
+): Promise<string> {
   const result = await $.classic.PostToolUse({
-    session_id: 's1',
+    session_id: session,
     tool_name: 'Bash',
     tool_input: { command: 'ls' },
     tool_response: { stdout: '' },
@@ -280,30 +285,10 @@ test('PostToolUseFailure warns too', async ($, on) => {
 
 const START = { cwd: '/', surface: 'terminal', isInteractive: true } as const
 
-function commandWorld(on: On): string[] {
-  const sets: string[] = []
+function commandWorld(on: On): void {
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('session.id', () => ({ value: 's1' }))
   on('command.register', (_, e) => ({ value: { command: e.name } }))
-  on('config.list', () => ({
-    value: [
-      {
-        key: 'usage-meter.enabled',
-        label: 'Warnings',
-        kind: 'boolean',
-        value: true,
-        provider: { plugin: 'usage-meter', tier: 'user' },
-        isLocked: false,
-      },
-    ],
-  }))
-  on('config.set', (_, e) => {
-    sets.push(`${e.key}=${String(e.value)}`)
-
-    return { value: e.value }
-  })
-
-  return sets
 }
 
 async function command($: Engine, args: string): Promise<string> {
@@ -333,15 +318,29 @@ test('/usage-meter prints the figures in one line', async ($, on) => {
   expect(await command($, '')).toContain('No usage figures yet')
 })
 
-test('/usage-meter on and off switch the warnings through /config', async ($, on) => {
-  world(on)
-  const sets = commandWorld(on)
+test('/usage-meter off quiets every session until on, without touching settings', async ($, on) => {
+  const w = world(on)
+  commandWorld(on)
   await $.session.start(START)
 
-  expect(await command($, 'off')).toBe('warnings off.')
+  expect(await command($, 'off')).toBe('warnings off in every session. /usage-meter on brings them back.')
+  w.setFive(95)
+  expect(await toolCall($)).toBe('')
+  expect(await toolCall($, undefined, undefined, 'another-session')).toBe('')
+  expect(await command($, '')).toContain('warnings off (/usage-meter on)')
+
   expect(await command($, 'on')).toBe('warnings on.')
-  expect(sets).toEqual(['usage-meter.enabled=false', 'usage-meter.enabled=true'])
+  expect(await toolCall($)).toContain('past the 80% stopping point')
   expect(await command($, 'sideways')).toContain('mute or unmute, for this session only')
+})
+
+test('/usage-meter on says when /config holds the warnings off', { options: { enabled: false } }, async ($, on) => {
+  world(on)
+  commandWorld(on)
+  await $.session.start(START)
+
+  expect(await command($, 'on')).toContain('still off in /config')
+  expect(await command($, '')).toContain('warnings off in /config')
 })
 
 test('/usage-meter mute quiets this session and its subagents until unmuted', async ($, on) => {

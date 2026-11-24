@@ -347,12 +347,15 @@ function list(marks: readonly number[]): string {
   return marks.length ? marks.join(', ') : 'none'
 }
 
+/** Whether warnings are held back: muted for this session, or off everywhere. */
+export type Quiet = { isMuted?: boolean; isPaused?: boolean }
+
 /** The one line `/usage-meter` prints. */
 export function summaryLine(
   usage: SessionUsage,
   settings: Settings,
   now: number,
-  isMuted = false,
+  quiet: Quiet = {},
 ): string {
   const parts: string[] = []
   const windows = ['five_hour', 'seven_day', 'spend_limit']
@@ -376,12 +379,14 @@ export function summaryLine(
   const skipped = settings.skipAgents.length ? `, not ${settings.skipAgents.join(', ')}` : ''
   parts.push(
     !settings.enabled
-      ? 'warnings off (/usage-meter on)'
-      : isMuted
-        ? 'warnings muted for this session (/usage-meter unmute)'
-        : `warnings on: ${list(settings.marks)} (subagents ${list(settings.agentMarks)}${skipped}` +
-          `${settings.weeklyMarks.length ? `; 7-day ${list(settings.weeklyMarks)}` : ''}), ` +
-          `stop at ${settings.stopAt}%`,
+      ? 'warnings off in /config'
+      : quiet.isPaused
+        ? 'warnings off (/usage-meter on)'
+        : quiet.isMuted
+          ? 'warnings muted for this session (/usage-meter unmute)'
+          : `warnings on: ${list(settings.marks)} (subagents ${list(settings.agentMarks)}${skipped}` +
+            `${settings.weeklyMarks.length ? `; 7-day ${list(settings.weeklyMarks)}` : ''}), ` +
+            `stop at ${settings.stopAt}%`,
   )
 
   return parts.join(' | ')

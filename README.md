@@ -58,8 +58,8 @@ To update later: `claude plugin update usage-meter@masterunix-usage-meter`, then
 | Command | What it does |
 |---|---|
 | `/usage-meter` | One line: the 5-hour and 7-day figures with their reset times, the context size, and the warning settings. Runs even while Claude is working. |
-| `/usage-meter off` | Stops the warnings in every session, until `/usage-meter on`. Same as turning off **Warnings** in `/config`. The figures and the command keep working. |
-| `/usage-meter on` | Starts them again. |
+| `/usage-meter off` | Pauses the warnings in every session, until `/usage-meter on`. The figures and the command keep working. Your settings aren't changed: the switch is kept in the mod's own store. |
+| `/usage-meter on` | Starts them again. (If **Warnings** is off in `/config`, it says so; turn it on there.) |
 | `/usage-meter mute` | Quiets the warnings for this session and its subagents only. Other sessions are unaffected, and the mute outlasts a reload or a resume. |
 | `/usage-meter unmute` | Brings them back for this session. |
 
@@ -71,7 +71,7 @@ Change these in `/config` (or on the install screen). A change takes effect at o
 
 | Setting | Default | What it does |
 |---|---|---|
-| **Warnings** (`enabled`) | on | Master switch for warnings. |
+| **Warnings** (`enabled`) | on | Master switch for warnings. `/usage-meter off` pauses them without changing it. |
 | **Thresholds** (`marks`) | `70, 80, 90` | Percent of the 5-hour window at which the main conversation is told, once each per window. |
 | **Subagent thresholds** (`agentMarks`) | `80, 90` | The same for subagents. Below the highest they are told to wrap up and report; at the highest, to stop and report. Empty means subagents are never told. |
 | **Subagent types to leave alone** (`skipAgents`) | none | Subagent types that are never told, such as `Explore, Plan`. `*` matches anything, as in `my-plugin:*`. Case doesn't matter. |
@@ -119,6 +119,17 @@ For example: `Usage is at {used} of the {window} window ({resets}). {instruction
 - **Once per window:** which thresholds were told is remembered per session, per subagent and per window in the mod's own store, so a reload or a resumed session doesn't repeat a warning. When the window resets, the thresholds start over. Records for windows that have ended, and mutes older than a week, are cleaned up when a session starts.
 - **It never gets in the way:** an error inside the mod is swallowed, and a tool call is never blocked, delayed for long, or changed.
 
+### What each hook does
+
+| Hook | What it does | What it changes |
+|---|---|---|
+| `session.start` | Registers `/usage-meter`, clears out records of windows that have ended and mutes older than a week, and sets the status entry (or clears it when **Status entry** is off). | Nothing in your session. |
+| `session.measure` | When the usage figures move, updates the status entry. Only with **Status entry** on. | Nothing else. |
+| `classic.PostToolUse`, `classic.PostToolUseFailure` | After each tool call, reads the figures. When a threshold has been newly passed, it adds the warning for Claude, and shows you the notice. | Adds one note (`additionalContext`) to that tool call's result. The tool's input, output and outcome are never changed, and the call is never blocked. |
+| `command.run` for `/usage-meter` | Answers its own command. | Nothing. The output is for you and isn't sent to Claude. |
+
+It never changes your settings or environment variables.
+
 ### What it can access
 
 `claude plugin validate` on this folder lists everything the mod does. It hooks `session.start`, `session.measure`, `classic.PostToolUse`, `classic.PostToolUseFailure` and its own `/usage-meter` command, and it calls:
@@ -127,11 +138,10 @@ For example: `Usage is at {used} of the {window} window ({resets}). {instruction
 |---|---|
 | `$.session.usage` | Read the usage figures and context size. |
 | `$.clock.now` | Work out reset times. |
-| `$.store.get`, `set`, `keys`, `delete` | Remember which thresholds were told, and which sessions are muted. |
+| `$.store.get`, `set`, `keys`, `delete` | Remember which thresholds were told, which sessions are muted, and whether `/usage-meter off` paused the warnings. |
 | `$.session.id` | Know which session `/usage-meter mute` applies to. |
 | `$.ui.toast`, `$.ui.status` | The notice and the optional status entry. |
 | `$.command.register` | The `/usage-meter` command. |
-| `$.config.list`, `$.config.set` | `/usage-meter on` and `off` flip the mod's own **Warnings** setting. |
 
 No file access, no processes, no network, no model calls.
 

@@ -1,19 +1,28 @@
 {
   "name": "usage-meter",
   "displayName": "Usage Meter",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Warns Claude, and you, as your claude.ai plan's 5-hour and 7-day usage limits fill up, so work reaches a clean stopping point before the limit cuts it off.",
-  "author": { "name": "masterunix", "url": "https://github.com/masterunix" },
+  "author": {
+    "name": "masterunix",
+    "url": "https://github.com/masterunix"
+  },
   "homepage": "https://github.com/masterunix/usage-meter",
   "repository": "https://github.com/masterunix/usage-meter",
   "license": "MIT",
-  "keywords": ["mod", "usage", "rate-limit", "usage-limit", "status-line", "subscription"],
-  "engines": { "claude-code": ">=2.1.290" },
+  "keywords": [
+    "mod",
+    "usage",
+    "rate-limit",
+    "usage-limit",
+    "status-line",
+    "subscription"
+  ],
   "userConfig": {
     "enabled": {
       "type": "boolean",
       "title": "Warnings",
-      "description": "Tell Claude (and you) when usage passes a threshold. /usage-meter on and /usage-meter off switch this too.",
+      "description": "Tell Claude (and you) when usage passes a threshold. /usage-meter off and on pause and resume the warnings without changing this.",
       "default": true
     },
     "marks": {

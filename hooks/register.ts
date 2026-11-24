@@ -4,7 +4,8 @@
 // the warning reaches the model as additionalContext on the tool call that
 // crossed a threshold, and which thresholds were told is kept in $.store per
 // session, audience and window, so a reload or a resume does not repeat one.
-// A session muted with /usage-meter mute is kept there too.
+// A session muted with /usage-meter mute, and /usage-meter off, are kept there
+// too: the mod never writes your settings.
 
 import type { EngineInterface, Register, SessionRateLimit } from 'claude-code'
 
@@ -26,6 +27,8 @@ import {
 
 const PREFIX = 'told/'
 const MUTED = 'muted/'
+// Set by /usage-meter off, for every session, until /usage-meter on.
+const PAUSED = 'paused'
 const WEEK_MS = 8 * 24 * 60 * 60 * 1000
 
 type ToolEvent = { session_id: string; agent_id?: string; agent_type?: string }
@@ -59,6 +62,16 @@ async function isMuted($: EngineInterface, session: string): Promise<boolean> {
   return mutes.get(session) === true
 }
 
+/** Read each time, so /usage-meter off in one session quiets the others at once. */
+async function isPaused($: EngineInterface): Promise<boolean> {
+  return (await $.store.get(PAUSED)) !== undefined
+}
+
+async function setPaused($: EngineInterface, value: boolean): Promise<void> {
+  if (value) await $.store.set(PAUSED, { at: await $.clock.now() })
+  else await $.store.delete(PAUSED)
+}
+
 async function setMuted($: EngineInterface, value: boolean): Promise<void> {
   const session = await $.session.id()
   if (value) await $.store.set(`${MUTED}${session}`, { at: await $.clock.now() })
@@ -90,6 +103,7 @@ async function claim(
 async function check($: EngineInterface, e: ToolEvent): Promise<string | undefined> {
   if (e.agent_id && isSkippedAgent(e.agent_type, settings.skipAgents)) return undefined
   if (await isMuted($, e.session_id)) return undefined
+  if (await isPaused($)) return undefined
 
   const usage = await $.session.usage()
   const five = findWindow(usage.rateLimits, 'five_hour')
@@ -148,16 +162,6 @@ async function prune($: EngineInterface): Promise<void> {
     const record = asTold(value)
     if (!record || isStale(record, now)) await $.store.delete(key)
   }
-}
-
-/** Flips the `enabled` setting through /config, as the person would. */
-async function switchWarnings($: EngineInterface, value: boolean): Promise<string | undefined> {
-  const row = (await $.config.list()).find(
-    one => one.provider.plugin === $.plugin.name && one.key.endsWith('.enabled'),
-  )
-  if (!row) return 'its setting is not in /config'
-
-  return (await $.config.set({ key: row.key, value })).deny
 }
 
 function reason(error: unknown): string {
@@ -220,19 +224,19 @@ export const register: Register = (on, options) => {
     const arg = e.args.trim().toLowerCase()
 
     if (arg === 'on' || arg === 'off') {
-      let deny: string | undefined
       try {
-        deny = await switchWarnings($, arg === 'on')
+        await setPaused($, arg === 'off')
       } catch (error) {
-        deny = reason(error)
+        return { text: `could not switch the warnings ${arg} (${reason(error)}).`, isTextDisplayOnly: true }
+      }
+      let text = arg === 'off'
+        ? 'warnings off in every session. /usage-meter on brings them back.'
+        : 'warnings on.'
+      if (arg === 'on' && !settings.enabled) {
+        text = 'Warnings is still off in /config: turn it on there (usage-meter, Warnings).'
       }
 
-      return {
-        text: deny
-          ? `could not switch the warnings ${arg} (${deny}). Use /config instead.`
-          : `warnings ${arg}.`,
-        isTextDisplayOnly: true,
-      }
+      return { text, isTextDisplayOnly: true }
     }
 
     if (arg === 'mute' || arg === 'unmute') {
@@ -261,9 +265,9 @@ export const register: Register = (on, options) => {
 
     try {
       const usage = await $.session.usage()
-      const muted = await isMuted($, await $.session.id())
+      const quiet = { isMuted: await isMuted($, await $.session.id()), isPaused: await isPaused($) }
 
-      return { text: summaryLine(usage, settings, await $.clock.now(), muted), isTextDisplayOnly: true }
+      return { text: summaryLine(usage, settings, await $.clock.now(), quiet), isTextDisplayOnly: true }
     } catch (error) {
       return { text: `could not read the figures (${reason(error)}).`, isTextDisplayOnly: true }
     }
