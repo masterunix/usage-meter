@@ -64,14 +64,14 @@ function world(on: On, store: Record<string, unknown> = {}): World {
 }
 
 /** One tool call, as Claude Code raises PostToolUse; what the model is told after it. */
-async function toolCall($: Engine, agentId?: string): Promise<string> {
+async function toolCall($: Engine, agentId?: string, agentType = 'general-purpose'): Promise<string> {
   const result = await $.classic.PostToolUse({
     session_id: 's1',
     tool_name: 'Bash',
     tool_input: { command: 'ls' },
     tool_response: { stdout: '' },
     tool_use_id: `t${Math.random()}`,
-    ...(agentId ? { agent_id: agentId, agent_type: 'general-purpose' } : {}),
+    ...(agentId ? { agent_id: agentId, agent_type: agentType } : {}),
   })
 
   return (result.additionalContext ?? []).join('\n')
@@ -283,6 +283,7 @@ const START = { cwd: '/', surface: 'terminal', isInteractive: true } as const
 function commandWorld(on: On): string[] {
   const sets: string[] = []
   on('session.start', (_, e) => ({ cwd: e.cwd }))
+  on('session.id', () => ({ value: 's1' }))
   on('command.register', (_, e) => ({ value: { command: e.name } }))
   on('config.list', () => ({
     value: [
@@ -337,11 +338,50 @@ test('/usage-meter on and off switch the warnings through /config', async ($, on
   const sets = commandWorld(on)
   await $.session.start(START)
 
-  expect(await command($, 'off')).toBe('usage-meter: warnings off.')
-  expect(await command($, 'on')).toBe('usage-meter: warnings on.')
+  expect(await command($, 'off')).toBe('warnings off.')
+  expect(await command($, 'on')).toBe('warnings on.')
   expect(sets).toEqual(['usage-meter.enabled=false', 'usage-meter.enabled=true'])
-  expect(await command($, 'sideways')).toContain('/usage-meter on or off')
+  expect(await command($, 'sideways')).toContain('mute or unmute, for this session only')
 })
+
+test('/usage-meter mute quiets this session and its subagents until unmuted', async ($, on) => {
+  const w = world(on)
+  commandWorld(on)
+  await $.session.start(START)
+
+  expect(await command($, 'mute')).toContain('muted for this session')
+  w.setFive(95)
+  expect(await toolCall($)).toBe('')
+  expect(await toolCall($, 'agent-1')).toBe('')
+  expect(await command($, '')).toContain('warnings muted for this session (/usage-meter unmute)')
+
+  expect(await command($, 'unmute')).toBe('warnings back on for this session.')
+  expect(await toolCall($)).toContain('past the 80% stopping point')
+  expect(await toolCall($, 'agent-1')).toContain('Stop here')
+})
+
+test('a mute outlasts a reload or a resume', async ($, on) => {
+  const w = world(on, { 'muted/s1': { at: NOW - 60_000 } })
+
+  w.setFive(95)
+  expect(await toolCall($)).toBe('')
+  expect(w.toasts).toHaveLength(0)
+})
+
+test(
+  'subagent types on the skip list are left alone',
+  { options: { skipAgents: 'Explore, my-plugin:*' } },
+  async ($, on) => {
+    const w = world(on)
+
+    w.setFive(95)
+    expect(await toolCall($, 'a1', 'Explore')).toBe('')
+    expect(await toolCall($, 'a2', 'explore')).toBe('')
+    expect(await toolCall($, 'a3', 'my-plugin:scout')).toBe('')
+    expect(await toolCall($, 'a4', 'general-purpose')).toContain('Stop here')
+    expect(await toolCall($)).toContain('past the 80% stopping point')
+  },
+)
 
 test('the status entry is off unless asked for', async ($, on) => {
   const w = world(on)
@@ -381,6 +421,8 @@ test('old records are cleared when a session starts', async ($, on) => {
     'told/undated/agent-9/five_hour': { resetsAt: null, told: [80], at: NOW - 9 * 86_400_000 },
     'told/s1/main/five_hour': { resetsAt: RESET, told: [70], at: NOW },
     'told/s1/main/seven_day': { resetsAt: null, told: [50], at: NOW - 86_400_000 },
+    'muted/old': { at: NOW - 9 * 86_400_000 },
+    'muted/s1': { at: NOW - 3_600_000 },
   }
   mock.clock(on, { now: NOW })
   on('store.keys', () => ({ value: Object.keys(store) }))
@@ -394,5 +436,5 @@ test('old records are cleared when a session starts', async ($, on) => {
   commandWorld(on)
   await $.session.start(START)
 
-  expect(Object.keys(store)).toEqual(['told/s1/main/five_hour', 'told/s1/main/seven_day'])
+  expect(Object.keys(store)).toEqual(['told/s1/main/five_hour', 'told/s1/main/seven_day', 'muted/s1'])
 })

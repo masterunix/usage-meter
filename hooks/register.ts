@@ -4,6 +4,7 @@
 // the warning reaches the model as additionalContext on the tool call that
 // crossed a threshold, and which thresholds were told is kept in $.store per
 // session, audience and window, so a reload or a resume does not repeat one.
+// A session muted with /usage-meter mute is kept there too.
 
 import type { EngineInterface, Register, SessionRateLimit } from 'claude-code'
 
@@ -11,6 +12,7 @@ import {
   asTold,
   claimMarks,
   findWindow,
+  isSkippedAgent,
   isStale,
   modelMessage,
   personToast,
@@ -23,14 +25,18 @@ import {
 } from './meter'
 
 const PREFIX = 'told/'
+const MUTED = 'muted/'
+const WEEK_MS = 8 * 24 * 60 * 60 * 1000
 
-type ToolEvent = { session_id: string; agent_id?: string }
+type ToolEvent = { session_id: string; agent_id?: string; agent_type?: string }
 
 // Module state: a reload evaluates the module afresh, so these start over
 // while $.store keeps what was told.
 let settings: Settings = readSettings({})
 // Records read this load, so a run of tool calls past a mark reads the store once.
 const cache = new Map<string, Told | undefined>()
+// Whether each session is muted, as read from the store this load.
+const mutes = new Map<string, boolean>()
 // One check at a time: parallel tool calls must not both tell the same mark.
 let queue: Promise<unknown> = Promise.resolve()
 
@@ -45,6 +51,19 @@ async function recall($: EngineInterface, key: string): Promise<Told | undefined
   if (!cache.has(key)) cache.set(key, asTold(await $.store.get(key)))
 
   return cache.get(key)
+}
+
+async function isMuted($: EngineInterface, session: string): Promise<boolean> {
+  if (!mutes.has(session)) mutes.set(session, (await $.store.get(`${MUTED}${session}`)) !== undefined)
+
+  return mutes.get(session) === true
+}
+
+async function setMuted($: EngineInterface, value: boolean): Promise<void> {
+  const session = await $.session.id()
+  if (value) await $.store.set(`${MUTED}${session}`, { at: await $.clock.now() })
+  else await $.store.delete(`${MUTED}${session}`)
+  mutes.set(session, value)
 }
 
 /** The marks newly passed for one audience and window, recorded as told. */
@@ -69,6 +88,9 @@ async function claim(
 
 /** What to tell the model after this tool call, if anything. */
 async function check($: EngineInterface, e: ToolEvent): Promise<string | undefined> {
+  if (e.agent_id && isSkippedAgent(e.agent_type, settings.skipAgents)) return undefined
+  if (await isMuted($, e.session_id)) return undefined
+
   const usage = await $.session.usage()
   const five = findWindow(usage.rateLimits, 'five_hour')
   const week = findWindow(usage.rateLimits, 'seven_day')
@@ -112,12 +134,18 @@ async function warning($: EngineInterface, e: ToolEvent): Promise<string | undef
   }
 }
 
-/** Drops kept records whose window has reset, so the store stays small. */
+/** Drops records whose window has reset and week-old mutes, so the store stays small. */
 async function prune($: EngineInterface): Promise<void> {
   const now = await $.clock.now()
-  const keys = (await $.store.keys()).filter(key => key.startsWith(PREFIX)).slice(0, 300)
-  for (const key of keys) {
-    const record = asTold(await $.store.get(key))
+  const keys = (await $.store.keys()).filter(key => key.startsWith(PREFIX) || key.startsWith(MUTED))
+  for (const key of keys.slice(0, 300)) {
+    const value = await $.store.get(key)
+    if (key.startsWith(MUTED)) {
+      const at = (value as { at?: unknown } | undefined)?.at
+      if (typeof at !== 'number' || at + WEEK_MS < now) await $.store.delete(key)
+      continue
+    }
+    const record = asTold(value)
     if (!record || isStale(record, now)) await $.store.delete(key)
   }
 }
@@ -143,8 +171,8 @@ export const register: Register = (on, options) => {
     try {
       await $.command.register({
         name: 'usage-meter',
-        description: 'Show the 5-hour and 7-day usage figures; "on" or "off" switches the warnings',
-        argumentHint: '[on|off]',
+        description: 'Show the 5-hour and 7-day usage figures; on/off switches the warnings, mute/unmute for this session',
+        argumentHint: '[on|off|mute|unmute]',
         immediate: true,
       })
     } catch {
@@ -201,25 +229,43 @@ export const register: Register = (on, options) => {
 
       return {
         text: deny
-          ? `usage-meter: could not switch the warnings ${arg} (${deny}). Use /config instead.`
-          : `usage-meter: warnings ${arg}.`,
+          ? `could not switch the warnings ${arg} (${deny}). Use /config instead.`
+          : `warnings ${arg}.`,
+        isTextDisplayOnly: true,
+      }
+    }
+
+    if (arg === 'mute' || arg === 'unmute') {
+      try {
+        await setMuted($, arg === 'mute')
+      } catch (error) {
+        return { text: `could not ${arg} this session (${reason(error)}).`, isTextDisplayOnly: true }
+      }
+
+      return {
+        text: arg === 'mute'
+          ? 'warnings muted for this session and its subagents. /usage-meter unmute brings them back.'
+          : 'warnings back on for this session.',
         isTextDisplayOnly: true,
       }
     }
 
     if (arg && arg !== 'status') {
       return {
-        text: 'usage-meter: /usage-meter shows the figures; /usage-meter on or off switches the warnings.',
+        text:
+          '/usage-meter shows the figures; on or off switches the warnings everywhere; ' +
+          'mute or unmute, for this session only.',
         isTextDisplayOnly: true,
       }
     }
 
     try {
       const usage = await $.session.usage()
+      const muted = await isMuted($, await $.session.id())
 
-      return { text: summaryLine(usage, settings, await $.clock.now()), isTextDisplayOnly: true }
+      return { text: summaryLine(usage, settings, await $.clock.now(), muted), isTextDisplayOnly: true }
     } catch (error) {
-      return { text: `usage-meter: could not read the figures (${reason(error)}).`, isTextDisplayOnly: true }
+      return { text: `could not read the figures (${reason(error)}).`, isTextDisplayOnly: true }
     }
   })
 }

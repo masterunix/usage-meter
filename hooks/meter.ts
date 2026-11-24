@@ -8,6 +8,8 @@ export type Settings = {
   enabled: boolean
   marks: number[]
   agentMarks: number[]
+  /** Subagent types never warned, such as `Explore`; `*` matches any run of characters. */
+  skipAgents: string[]
   weeklyMarks: number[]
   stopAt: number
   instruction: string
@@ -62,6 +64,24 @@ export function parseMarks(value: unknown): number[] {
   return [...new Set(marks)].sort((a, b) => a - b)
 }
 
+/** Names from a setting such as "Explore, my-plugin:*", each once, in the order written. */
+export function parseNames(value: unknown): string[] {
+  const parts = Array.isArray(value) ? value.map(String) : typeof value === 'string' ? value.split(/[\s,;]+/) : []
+
+  return [...new Set(parts.map(part => part.trim()).filter(Boolean))]
+}
+
+/** Whether a subagent of this type is left alone. Names compare without regard to case. */
+export function isSkippedAgent(agentType: string | undefined, skip: readonly string[]): boolean {
+  if (!agentType) return false
+
+  return skip.some(name => {
+    const pattern = name.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*')
+
+    return new RegExp(`^${pattern}$`, 'i').test(agentType)
+  })
+}
+
 function flag(value: unknown, fallback: boolean): boolean {
   return typeof value === 'boolean' ? value : fallback
 }
@@ -77,6 +97,7 @@ export function readSettings(options: PluginOptions): Settings {
     enabled: flag(options.enabled, true),
     marks: parseMarks(options.marks ?? '70, 80, 90'),
     agentMarks: parseMarks(options.agentMarks ?? '80, 90'),
+    skipAgents: parseNames(options.skipAgents ?? ''),
     weeklyMarks: parseMarks(options.weeklyMarks ?? ''),
     stopAt: Number.isFinite(stopAt) && stopAt > 0 && stopAt <= 100 ? stopAt : 80,
     instruction: text(options.instruction) || DEFAULT_INSTRUCTION,
@@ -327,7 +348,12 @@ function list(marks: readonly number[]): string {
 }
 
 /** The one line `/usage-meter` prints. */
-export function summaryLine(usage: SessionUsage, settings: Settings, now: number): string {
+export function summaryLine(
+  usage: SessionUsage,
+  settings: Settings,
+  now: number,
+  isMuted = false,
+): string {
   const parts: string[] = []
   const windows = ['five_hour', 'seven_day', 'spend_limit']
     .map(kind => findWindow(usage.rateLimits, kind))
@@ -347,12 +373,15 @@ export function summaryLine(usage: SessionUsage, settings: Settings, now: number
   const tokens = usage.context.tokens
   if (tokens) parts.push(`context ${Math.round(tokens / 1000)}k of ${Math.round(usage.context.window / 1000)}k`)
 
+  const skipped = settings.skipAgents.length ? `, not ${settings.skipAgents.join(', ')}` : ''
   parts.push(
-    settings.enabled
-      ? `warnings on: ${list(settings.marks)} (subagents ${list(settings.agentMarks)}` +
-          `${settings.weeklyMarks.length ? `, 7-day ${list(settings.weeklyMarks)}` : ''}), ` +
-          `stop at ${settings.stopAt}%`
-      : 'warnings off (/usage-meter on)',
+    !settings.enabled
+      ? 'warnings off (/usage-meter on)'
+      : isMuted
+        ? 'warnings muted for this session (/usage-meter unmute)'
+        : `warnings on: ${list(settings.marks)} (subagents ${list(settings.agentMarks)}${skipped}` +
+          `${settings.weeklyMarks.length ? `; 7-day ${list(settings.weeklyMarks)}` : ''}), ` +
+          `stop at ${settings.stopAt}%`,
   )
 
   return parts.join(' | ')

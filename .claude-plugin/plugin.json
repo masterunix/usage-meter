@@ -1,7 +1,7 @@
 {
   "name": "usage-meter",
   "displayName": "Usage Meter",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Warns Claude, and you, as your claude.ai plan's 5-hour and 7-day usage limits fill up, so work reaches a clean stopping point before the limit cuts it off.",
   "author": { "name": "masterunix", "url": "https://github.com/masterunix" },
   "homepage": "https://github.com/masterunix/usage-meter",
@@ -27,6 +27,12 @@
       "title": "Subagent thresholds",
       "description": "Percent of the 5-hour window at which a subagent is told to wrap up; at the highest it is told to stop and report. Empty for never.",
       "default": "80, 90"
+    },
+    "skipAgents": {
+      "type": "string",
+      "title": "Subagent types to leave alone",
+      "description": "Subagent types never warned, such as \"Explore, Plan\". * matches anything, as in \"my-plugin:*\". Empty (the default) warns every subagent.",
+      "default": ""
     },
     "stopAt": {
       "type": "number",
