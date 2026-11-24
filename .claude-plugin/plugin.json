@@ -1,0 +1,70 @@
+{
+  "name": "usage-meter",
+  "displayName": "Usage Meter",
+  "version": "0.1.0",
+  "description": "Warns Claude, and you, as your claude.ai plan's 5-hour and 7-day usage limits fill up, so work reaches a clean stopping point before the limit cuts it off.",
+  "author": { "name": "masterunix", "url": "https://github.com/masterunix" },
+  "homepage": "https://github.com/masterunix/usage-meter",
+  "repository": "https://github.com/masterunix/usage-meter",
+  "license": "MIT",
+  "keywords": ["mod", "usage", "rate-limit", "usage-limit", "status-line", "subscription"],
+  "engines": { "claude-code": ">=2.1.290" },
+  "userConfig": {
+    "enabled": {
+      "type": "boolean",
+      "title": "Warnings",
+      "description": "Tell Claude (and you) when usage passes a threshold. /usage-meter on and /usage-meter off switch this too.",
+      "default": true
+    },
+    "marks": {
+      "type": "string",
+      "title": "Thresholds",
+      "description": "Percent of the 5-hour window at which the main conversation is told, once each per window. Comma-separated.",
+      "default": "70, 80, 90"
+    },
+    "agentMarks": {
+      "type": "string",
+      "title": "Subagent thresholds",
+      "description": "Percent of the 5-hour window at which a subagent is told to wrap up; at the highest it is told to stop and report. Empty for never.",
+      "default": "80, 90"
+    },
+    "stopAt": {
+      "type": "number",
+      "title": "Stopping point",
+      "description": "The percent of the 5-hour window where Claude should be at a stopping point. The wording of every warning follows it.",
+      "default": 80,
+      "min": 1,
+      "max": 100
+    },
+    "instruction": {
+      "type": "string",
+      "title": "What to do at the stopping point",
+      "description": "Told to Claude at the stopping point, in your words. Empty for the built-in text.",
+      "default": ""
+    },
+    "weeklyMarks": {
+      "type": "string",
+      "title": "7-day thresholds",
+      "description": "Percent of the 7-day window at which the main conversation is told. Empty (the default) for no weekly warnings.",
+      "default": ""
+    },
+    "template": {
+      "type": "string",
+      "title": "Custom message",
+      "description": "Replaces the main conversation's warning. Placeholders: {used} {window} {resets} {mark} {stopAt} {instruction} {context}. Empty for the built-in wording.",
+      "default": ""
+    },
+    "toast": {
+      "type": "boolean",
+      "title": "Show a notice",
+      "description": "Show you a short notice whenever Claude is warned.",
+      "default": true
+    },
+    "showStatus": {
+      "type": "boolean",
+      "title": "Status entry",
+      "description": "Keep the 5-hour and 7-day figures under the prompt, such as \"5h 42% · 7d 12%\".",
+      "default": false
+    }
+  }
+}

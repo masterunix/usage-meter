@@ -1,0 +1,12 @@
+{
+  "name": "masterunix-usage-meter",
+  "owner": { "name": "masterunix", "url": "https://github.com/masterunix" },
+  "description": "usage-meter, a Claude Code mod that warns Claude and you as your plan's usage limits fill up.",
+  "plugins": [
+    {
+      "name": "usage-meter",
+      "source": "./",
+      "description": "Warns Claude, and you, as your claude.ai plan's 5-hour and 7-day usage limits fill up."
+    }
+  ]
+}
